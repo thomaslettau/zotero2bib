@@ -1,0 +1,82 @@
+#!/usr/bin/python2
+# -*- coding: utf-8 -*-
+#
+# author: Thomas Lettau
+# Latex api for zotero
+
+
+from pyzotero import zotero
+import io
+import re
+
+import argparse
+
+parser = argparse.ArgumentParser(description='Create bibinfo from Zotero for Latex.')
+parser.add_argument('-c','--collect', help='Name of the Collection', default='Forschungsbeleg')
+args = parser.parse_args()
+
+reg = re.compile('\d{4}')
+
+library_id   ='fill in here'           # Can be found in Feeds/api
+library_type ='user'
+api_key      ='fill in here'           # Also in Feeds/Api 
+collect_name = args.collect
+
+
+# creates the abreviations for the \cite{.} command in latex
+def shorty(creator, year):
+    #shor = '%s%s' %(unicode(creator[0]['lastName']).encode('ascii')[:3], reg.findall(year)[0][2:4])
+    shor = '%s%s' %(creator[0]['lastName'].encode('utf-8')[:3], reg.findall(year)[0][2:4])
+    return shor
+
+# creates a string containing all authors
+def authors(creator):
+    names = ''
+    if len(creator) > 3:
+        creator = creator[0:3]
+    for i , dat in enumerate(creator) :
+        if i: names += ' '
+        #names += '%s, %s.' %(unicode(dat['lastName']).encode('ascii'), unicode(dat['firstName']).encode('ascii')[0])
+        names += '%s, %s.' %(dat['lastName'].encode('utf-8'), dat['firstName'].encode('utf-8')[0])
+    return names
+
+# gets key of the collection
+def getkey(collects, colname):
+    for collect in collects:
+        if collect['name']==colname:
+            return collect['collectionKey']
+    return False
+
+
+zot = zotero.Zotero(library_id, library_type, api_key)
+collect_id = getkey(zot.collections(),collect_name)
+
+items = zot.collection_items(collect_id)
+
+
+
+# main programm
+
+bib = ''
+
+f = io.open('bibimport', 'wb')#, encoding='utf8')
+
+for i, item in enumerate(items):
+    print i , '\t:', item['creators'][0]['lastName']
+    # ---- Webbage ----
+    if item['itemType']=='webpage':
+        f.write('\\bibitem[%s]{%s} %s {\it %s} %s \href{%s}{%s} \n \n' %(shorty(item['creators'],item['date'].encode('utf-8')),shorty(item['creators'],item['date'].encode('utf-8')),authors(item['creators']), item['title'], item['date'], item['url'], item['websiteTitle']))
+
+    # ---- Journal ----
+    if item['itemType']=='journalArticle':
+        f.write('\\bibitem[%s]{%s} %s {\it %s} %s \href{%s}{%s} \n \n' %(shorty(item['creators'],item['date'].encode('utf-8')),shorty(item['creators'],item['date'].encode('utf-8')),authors(item['creators']), item['title'].encode('utf-8'), item['date'].encode('utf-8'), item['url'].encode('utf-8'),item['publicationTitle'].encode('utf-8')))
+    
+    # ---- Book   ----
+    if item['itemType']=='book':
+        f.write('\\bibitem[%s]{%s} %s {\it %s} %s $\\cdot$ %s, %s \n \n' %(shorty(item['creators'],item['date'].encode('utf-8')),shorty(item['creators'],item['date'].encode('utf-8')),authors(item['creators']),item['title'].encode('utf-8') ,item['publisher'].encode('utf-8') ,item['place'].encode('utf-8') ,item['date'] ))
+
+    # ---- Manuscript----
+    if item['itemType']=='manuscript':
+        f.write('\\bibitem[%s]{%s} %s {\it %s} $\\cdot$ %s, %s \n \n' %(shorty(item['creators'],item['date'].encode('utf-8')),shorty(item['creators'],item['date'].encode('utf-8')),authors(item['creators']), item['title'].encode('utf-8') ,item['place'].encode('utf-8') ,item['date'].encode('utf-8') ))
+
+f.close()
