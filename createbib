@@ -8,6 +8,7 @@
 from pyzotero import zotero
 import io
 import re
+from collections import OrderedDict
 
 import argparse
 
@@ -17,23 +18,78 @@ args = parser.parse_args()
 
 reg = re.compile('\d{4}')
 
-library_id   ='fill in here'           # Can be found in Feeds/api
+library_id   ='1772740'                     # Can be found in Feeds/api
 library_type ='user'
-api_key      ='fill in here'           # Also in Feeds/Api 
+api_key      ='QLXiU0VIEWykl6fDUEGze9mv'    # Also in Feeds/Api 
 collect_name = args.collect
+
+esc_characters = OrderedDict([
+        ('\\', '\\\\'),
+        ('&' , '\&'),
+        ('%' , '\%'),
+        ('$' , '\$'),
+        ('#' , '\#'),
+        ('_' , '\_'),
+        ('{' , '\{'),
+        ('}' , '\}'),
+        ('~' , '\~'),
+        ('^' , '\^')])
+
+umlaut_characters = {
+        u'a' : u'ä',
+        u'o' : u'ö',
+        u'u' : u'ü'}
+
+def multipleReplace(text, escDict, umDict):
+    for key in escDict:
+        text = text.replace(key, escDict[key])
+    if u'\u0308' in text:
+        pos  = text.find(u'\u0308')
+        text = text[:pos] + text[pos+1:]
+        for key in umDict:
+            if text.find(key) == pos-1:
+                text = text[:pos-1] + umDict[key] + text[pos:]
+    return text
+
+def removeEscChars(item):
+    if isinstance(item,dict):
+        for key, value in item.iteritems():
+            item[key] = removeEscChars(value)
+    elif isinstance(item,list):
+        if len(item):
+            if isinstance(item[0],dict):
+                for key, value in item[0].iteritems():
+                    item[0][key] = removeEscChars(value)
+            else:
+                for i in range(len(item)):
+                    item[i] = removeEscChars(item[i])
+    else:
+        if isinstance(item,unicode):
+            item = multipleReplace(item, esc_characters, umlaut_characters) 
+        else:
+            print item
+
+    return item
+
+# extracts the year  
+def yearonly(year):
+    return reg.findall(year)[0].encode('utf-8')
 
 
 # creates the abreviations for the \cite{.} command in latex
 def shorty(creator, year):
     #shor = '%s%s' %(unicode(creator[0]['lastName']).encode('ascii')[:3], reg.findall(year)[0][2:4])
     shor = '%s%s' %(creator[0]['lastName'].encode('utf-8')[:3], reg.findall(year)[0][2:4])
+    shor.replace(u'ä', 'ae')
+    shor.replace(u'ö', 'oe')
+    shor.replace(u'ü', 'ue')
     return shor
 
 # creates a string containing all authors
 def authors(creator):
     names = ''
-    if len(creator) > 3:
-        creator = creator[0:3]
+    #if len(creator) > 3:
+    #    creator = creator[0:3]
     for i , dat in enumerate(creator) :
         if i: names += ' '
         #names += '%s, %s.' %(unicode(dat['lastName']).encode('ascii'), unicode(dat['firstName']).encode('ascii')[0])
@@ -48,13 +104,18 @@ def getkey(collects, colname):
     return False
 
 
+
 zot = zotero.Zotero(library_id, library_type, api_key)
 collect_id = getkey(zot.collections(),collect_name)
 
 items = zot.collection_items(collect_id)
 
+# sort by first authors lastName
+items = sorted(items, key=lambda t: t['creators'][0]['lastName'])
 
-
+# remove wrong characters
+for i in range(len(items)):
+    items[i] = removeEscChars(items[i])
 # main programm
 
 bib = ''
@@ -65,18 +126,45 @@ for i, item in enumerate(items):
     print i , '\t:', item['creators'][0]['lastName']
     # ---- Webbage ----
     if item['itemType']=='webpage':
-        f.write('\\bibitem[%s]{%s} %s {\it %s} %s \href{%s}{%s} \n \n' %(shorty(item['creators'],item['date'].encode('utf-8')),shorty(item['creators'],item['date'].encode('utf-8')),authors(item['creators']), item['title'], item['date'], item['url'], item['websiteTitle']))
-
+        f.write('\\bibitem[%s]{%s} %s \\textit{ %s} %s \href{%s}{%s} \n \n' 
+                                                                       %(shorty(item['creators'],item['date'].encode('utf-8'))
+                                                                        ,shorty(item['creators'],item['date'].encode('utf-8'))
+                                                                        ,authors(item['creators'])
+                                                                        ,item['title']
+                                                                        ,yearonly(item['date'])
+                                                                        ,item['url']
+                                                                        ,item['websiteTitle']))
     # ---- Journal ----
     if item['itemType']=='journalArticle':
-        f.write('\\bibitem[%s]{%s} %s {\it %s} %s \href{%s}{%s} \n \n' %(shorty(item['creators'],item['date'].encode('utf-8')),shorty(item['creators'],item['date'].encode('utf-8')),authors(item['creators']), item['title'].encode('utf-8'), item['date'].encode('utf-8'), item['url'].encode('utf-8'),item['publicationTitle'].encode('utf-8')))
-    
+        f.write('\\bibitem[%s]{%s} %s \\textit{ %s} %s \href{%s}{%s} \n \n' 
+                                                                       %(shorty(item['creators'],item['date'].encode('utf-8'))
+                                                                        ,shorty(item['creators'],item['date'].encode('utf-8'))
+                                                                        ,authors(item['creators'])
+                                                                        ,item['title'].encode('utf-8')
+                                                                        ,yearonly(item['date']).encode('utf-8')
+                                                                        ,item['url'].encode('utf-8')
+                                                                        ,item['publicationTitle'].encode('utf-8')))
     # ---- Book   ----
     if item['itemType']=='book':
-        f.write('\\bibitem[%s]{%s} %s {\it %s} %s $\\cdot$ %s, %s \n \n' %(shorty(item['creators'],item['date'].encode('utf-8')),shorty(item['creators'],item['date'].encode('utf-8')),authors(item['creators']),item['title'].encode('utf-8') ,item['publisher'].encode('utf-8') ,item['place'].encode('utf-8') ,item['date'] ))
-
+        f.write('\\bibitem[%s]{%s} %s \\textit{ %s} %s $\\cdot$ %s, %s \n \n'   
+                                                                           %(shorty(item['creators'],item['date'].encode('utf-8'))
+                                                                            ,shorty(item['creators'],item['date'].encode('utf-8'))
+                                                                            ,authors(item['creators'])
+                                                                            ,item['title'].encode('utf-8') 
+                                                                            ,item['publisher'].encode('utf-8') 
+                                                                            ,item['place'].encode('utf-8') 
+                                                                            ,yearonly(item['date'] )))
     # ---- Manuscript----
     if item['itemType']=='manuscript':
-        f.write('\\bibitem[%s]{%s} %s {\it %s} $\\cdot$ %s, %s \n \n' %(shorty(item['creators'],item['date'].encode('utf-8')),shorty(item['creators'],item['date'].encode('utf-8')),authors(item['creators']), item['title'].encode('utf-8') ,item['place'].encode('utf-8') ,item['date'].encode('utf-8') ))
+        f.write('\\bibitem[%s]{%s} %s \\textit{ %s} $\\cdot$ %s, %s \n \n'  
+                                                                       %(shorty(item['creators'],item['date'].encode('utf-8'))
+                                                                        ,shorty(item['creators'],item['date'].encode('utf-8'))
+                                                                        ,authors(item['creators'])
+                                                                        ,item['title'].encode('utf-8') 
+                                                                        ,item['place'].encode('utf-8') 
+                                                                        ,item['date'].encode('utf-8')))
 
 f.close()
+
+
+
