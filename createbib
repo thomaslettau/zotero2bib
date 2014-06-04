@@ -18,10 +18,12 @@ args = parser.parse_args()
 
 reg = re.compile('\d{4}')
 
-library_id   ='1772740'                     # Can be found in Feeds/api
+library_id   ='1234'                    # Can be found in Feeds/api
 library_type ='user'
-api_key      ='QLXiU0VIEWykl6fDUEGze9mv'    # Also in Feeds/Api 
+api_key      ='asdf'                    # Also in Feeds/Api 
 collect_name = args.collect
+
+vid_num=0
 
 esc_characters = OrderedDict([
         ('\\', '\\\\'),
@@ -66,8 +68,8 @@ def removeEscChars(item):
     else:
         if isinstance(item,unicode):
             item = multipleReplace(item, esc_characters, umlaut_characters) 
-        else:
-            print item
+        #else:
+            #print item
 
     return item
 
@@ -84,16 +86,22 @@ def shorty(creator, year):
     shor.replace(u'ö', 'oe')
     shor.replace(u'ü', 'ue')
     return shor
+#
+# creates the abreviations for the \cite{.} command in latex
+def shorty_vid():
+    global vid_num 
+    vid_num += 1
+    shor = 'Vid%i' %(vid_num)
+    return shor
 
 # creates a string containing all authors
 def authors(creator):
     names = ''
-    #if len(creator) > 3:
-    #    creator = creator[0:3]
+
     for i , dat in enumerate(creator) :
         if i: names += ' '
-        #names += '%s, %s.' %(unicode(dat['lastName']).encode('ascii'), unicode(dat['firstName']).encode('ascii')[0])
-        names += '%s, %s.' %(dat['lastName'].encode('utf-8'), dat['firstName'].encode('utf-8')[0])
+        first = ' '.join([f[0]+'.' for f in dat['firstName'].encode('utf-8').split()]) # look for multiple names
+        names += '%s %s,' %(first, dat['lastName'].encode('utf-8'))
     return names
 
 # gets key of the collection
@@ -103,7 +111,11 @@ def getkey(collects, colname):
             return collect['collectionKey']
     return False
 
-
+def primary_check(title, extra):
+    if 'primary' in extra:
+        return '\\textbf{%s}' %title
+    else :
+        return title
 
 zot = zotero.Zotero(library_id, library_type, api_key)
 collect_id = getkey(zot.collections(),collect_name)
@@ -111,7 +123,7 @@ collect_id = getkey(zot.collections(),collect_name)
 items = zot.collection_items(collect_id)
 
 # sort by first authors lastName
-items = sorted(items, key=lambda t: t['creators'][0]['lastName'])
+items = sorted(items, key=lambda t: t['creators'][0]['lastName'] if (t['itemType'] != 'videoRecording') else t['creators'][0]['name'] )
 
 # remove wrong characters
 for i in range(len(items)):
@@ -123,34 +135,36 @@ bib = ''
 f = io.open('bibimport', 'wb')#, encoding='utf8')
 
 for i, item in enumerate(items):
-    print i , '\t:', item['creators'][0]['lastName']
+    print i , '\t:', shorty(item['creators'],item['date'].encode('utf-8'))  
     # ---- Webbage ----
     if item['itemType']=='webpage':
         f.write('\\bibitem[%s]{%s} %s \\textit{ %s} %s \href{%s}{%s} \n \n' 
                                                                        %(shorty(item['creators'],item['date'].encode('utf-8'))
                                                                         ,shorty(item['creators'],item['date'].encode('utf-8'))
                                                                         ,authors(item['creators'])
-                                                                        ,item['title']
+                                                                        ,primary_check(item['title'].encode('utf-8'),item['extra'])
                                                                         ,yearonly(item['date'])
                                                                         ,item['url']
                                                                         ,item['websiteTitle']))
     # ---- Journal ----
     if item['itemType']=='journalArticle':
-        f.write('\\bibitem[%s]{%s} %s \\textit{ %s} %s \href{%s}{%s} \n \n' 
+        f.write('\\bibitem[%s]{%s} %s \\textit{ %s} \href{%s}{%s \\textbf{%s}, %s (%s)} \n \n' 
                                                                        %(shorty(item['creators'],item['date'].encode('utf-8'))
                                                                         ,shorty(item['creators'],item['date'].encode('utf-8'))
                                                                         ,authors(item['creators'])
-                                                                        ,item['title'].encode('utf-8')
-                                                                        ,yearonly(item['date']).encode('utf-8')
+                                                                        ,primary_check(item['title'].encode('utf-8'), item['extra'])
                                                                         ,item['url'].encode('utf-8')
-                                                                        ,item['publicationTitle'].encode('utf-8')))
+                                                                        ,item['publicationTitle'].encode('utf-8')
+                                                                        ,item['volume'].encode('utf-8')
+                                                                        ,item['pages'].encode('utf-8')
+                                                                        ,yearonly(item['date']).encode('utf-8')))
     # ---- Book   ----
     if item['itemType']=='book':
         f.write('\\bibitem[%s]{%s} %s \\textit{ %s} %s $\\cdot$ %s, %s \n \n'   
                                                                            %(shorty(item['creators'],item['date'].encode('utf-8'))
                                                                             ,shorty(item['creators'],item['date'].encode('utf-8'))
                                                                             ,authors(item['creators'])
-                                                                            ,item['title'].encode('utf-8') 
+                                                                            ,primary_check(item['title'].encode('utf-8'), item['extra'] )
                                                                             ,item['publisher'].encode('utf-8') 
                                                                             ,item['place'].encode('utf-8') 
                                                                             ,yearonly(item['date'] )))
@@ -160,10 +174,16 @@ for i, item in enumerate(items):
                                                                        %(shorty(item['creators'],item['date'].encode('utf-8'))
                                                                         ,shorty(item['creators'],item['date'].encode('utf-8'))
                                                                         ,authors(item['creators'])
-                                                                        ,item['title'].encode('utf-8') 
+                                                                        ,primary_check(item['title'].encode('utf-8') , item['extra'])
                                                                         ,item['place'].encode('utf-8') 
                                                                         ,item['date'].encode('utf-8')))
-
+    # ---- Youtube ----
+    if item['itemType']=='videoRecording':
+        f.write('\\bibitem[%s]{%s} \\textit{Youtube:} \href{%s}{%s} \n \n' 
+                                                                       %(shorty_vid()
+                                                                        ,shorty_vid()
+                                                                        ,item['url']
+                                                                        ,primary_check(item['title'], item['extra'])))
 f.close()
 
 
